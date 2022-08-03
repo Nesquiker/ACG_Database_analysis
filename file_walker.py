@@ -4,16 +4,8 @@ import re
 import collections as col
 
 
-
-
-def extract_state_abbreviations(abbreviations) -> set[str]:
-    answer = set()
-    for word in abbreviations:
-        out = []
-        for letter in filter(lambda x: x.isalpha(), word):
-            out.append(letter.upper())
-        answer |= {''.join(out), }
-    return answer
+COLUMN_NAMES = ['apogee_project_number', 'project_name', 'client', 'state', 'facility', 'file_path']
+DATA = {name: [] for name in COLUMN_NAMES}
 
 
 def find_year(year_dir):
@@ -67,7 +59,7 @@ def find_project_name(content: str) -> tuple[str, str]:
     return content, content
 
 
-def find_campus(content: str) -> tuple[str, str]:
+def find_facility(content: str) -> tuple[str, str]:
     out = col.deque([])
     for i in reversed(range(len(content))):
         if content[i] == '-':
@@ -75,14 +67,27 @@ def find_campus(content: str) -> tuple[str, str]:
     return content, content
 
 
+def create_temp_map() -> dict[str]:
+    return {name: 'Unknown' for name in COLUMN_NAMES}
 
 
+def create_state_codes(path_to_state_data: str) -> set[str]:
+    state_abbreviations = pd.read_csv(path_to_state_data)
+    abbreviations = extract_state_abbreviations(state_abbreviations.Abbrev)
+    return set(code.upper() for code in state_abbreviations.Code) | abbreviations
 
 
-directory = r'C:\dummy'
-state_abbreviations = pd.read_csv(r'data_for_lookups/state_data.csv')
-abbreviations = extract_state_abbreviations(state_abbreviations.Abbrev)
-state_code_set = set(code.upper() for code in state_abbreviations.Code) | abbreviations
+def extract_state_abbreviations(abbreviations) -> set[str]:
+    answer = set()
+    for word in abbreviations:
+        out = []
+        for letter in filter(lambda x: x.isalpha(), word):
+            out.append(letter.upper())
+        answer |= {''.join(out), }
+    return answer
+
+
+state_code_set = create_state_codes(r'data_for_lookups/state_data.csv')
 
 
 class apogeeFile:
@@ -95,21 +100,22 @@ class apogeeFile:
     is_project_file: bool
     apogee_project_number: str
     client: str
-    campus = "Unknown"
+    facility: str
     project_name: str
     state: str
+    temp_map: dict
 
     def __init__(self, apogee_file_path):
         self.path = apogee_file_path
+        self.temp_map = create_temp_map()
         self.parse_file_path()
-        # self.add_to_database()
-        # if previous_file != None:
-        #     self.other
+
 
     def parse_file_path(self):
         directories = self.path.split('\\')
         self.additional_dirs = []
-        print(directories)
+        print(self.temp_map)
+        self.temp_map[COLUMN_NAMES[5]] = self.path
         for i, content in enumerate(directories):
             if i < 2:
                 pass
@@ -122,36 +128,31 @@ class apogeeFile:
                 remaining = content.strip()
 
                 self.state, remaining = find_location(remaining)
-                print(self.state)
+                self.temp_map[COLUMN_NAMES[3]] = self.state
                 self.apogee_project_number, remaining = find_project_number(remaining)
-                print(self.apogee_project_number)
-                print(remaining)
+                self.temp_map[COLUMN_NAMES[0]] = self.apogee_project_number
                 self.client, remaining = find_client(remaining)
-                print(self.client)
-                print(remaining)
+                self.temp_map[COLUMN_NAMES[2]] = self.client
                 self.project_name, remaining = find_project_name(remaining)
-                self.campus, remaining = find_campus(remaining)
-                print(self.campus)
-                print(remaining)
+                self.temp_map[COLUMN_NAMES[1]] = self.project_name
+                self.facility, remaining = find_facility(remaining)
+                self.temp_map[COLUMN_NAMES[4]] = self.facility
             elif i == 4:
                 self.function_dir = content
             else:
                 self.additional_dirs.append(content)
 
-    def add_to_database(self, data):
-        file_data = [self.apogee_project_number, self.project_name, self.client, self.state, self.campus, self.path]
-        for name, file_dat in zip(data, file_data):
-            data[name].append(file_dat)
+    def add_file_to_data(self):
+        for column in self.temp_map:
+            DATA[column].append(self.temp_map[column])
 
 
-
-column_names = ['Apogee_Project_Number', 'Project_Name', 'Client', 'State', 'Facility', 'File_Path']
-data = {name : [] for name in column_names}
+directory = r'C:\dummy'
 for root, dirs, files in os.walk(directory):
 
     for filename in files:
         print(os.path.join(root, filename))
         this_one = apogeeFile(os.path.join(root, filename))
-        this_one.add_to_database(data)
+        this_one.add_file_to_data()
 
-test_database = pd.DataFrame(data)
+test_database = pd.DataFrame(DATA)
