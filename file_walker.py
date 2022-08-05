@@ -11,17 +11,17 @@ COLUMN_NAMES = ['apogee_project_number',
                 'file_name']
 
 
-def create_empty_data():
+def _create_empty_data():
     return {name: [] for name in COLUMN_NAMES}
 
 
-def create_state_codes(path_to_state_data: str) -> set[str]:
+def _create_state_codes(path_to_state_data: str) -> set[str]:
     state_abbreviations = pd.read_csv(path_to_state_data)
-    abbreviations = extract_state_abbreviations(state_abbreviations.Abbrev)
+    abbreviations = _extract_state_abbreviations(state_abbreviations.Abbrev)
     return set(code.upper() for code in state_abbreviations.Code) | abbreviations | {'US', 'SS'}
 
 
-def extract_state_abbreviations(abbreviations) -> set[str]:
+def _extract_state_abbreviations(abbreviations) -> set[str]:
     answer = set()
     for word in abbreviations:
         out = []
@@ -31,10 +31,10 @@ def extract_state_abbreviations(abbreviations) -> set[str]:
     return answer
 
 
-STATE_CODE_SET = create_state_codes(r'data_for_lookups/state_data.csv')
+_STATE_CODE_SET = _create_state_codes(r'data_for_lookups/state_data.csv')
 
 
-def find_year(year_dir):
+def _find_year(year_dir):
     year = year_dir[:4]
     if year.isdigit() and len(year) == 4:
         return year
@@ -42,7 +42,7 @@ def find_year(year_dir):
         return "Unknown"
 
 
-def find_location(content: str) -> tuple[str, str]:
+def _find_location(content: str) -> tuple[str, str]:
     out = col.deque([])
     count = 0
     for i, letter in enumerate(content[::-1]):
@@ -52,12 +52,12 @@ def find_location(content: str) -> tuple[str, str]:
 
         else:
             state = ''.join(out)
-            if state not in STATE_CODE_SET:
+            if state not in _STATE_CODE_SET:
                 return 'Unknown', content
             return state, content[:-i - 1]
 
 
-def find_project_number(content: str) -> tuple[str, str, int]:
+def _find_project_number(content: str) -> tuple[str, str, int]:
     out = []
     digit_count = 0
     for i, char in enumerate(content):
@@ -71,7 +71,7 @@ def find_project_number(content: str) -> tuple[str, str, int]:
     return out, content[i:], digit_count
 
 
-def find_client(content: str) -> tuple[str, str]:
+def _find_client(content: str) -> tuple[str, str]:
     out = []
     for i, letter in enumerate(content):
         if not letter.isalpha():
@@ -81,11 +81,11 @@ def find_client(content: str) -> tuple[str, str]:
     return ''.join(out), content
 
 
-def find_project_name(content: str) -> tuple[str, str]:
+def _find_project_name(content: str) -> tuple[str, str]:
     return content, content
 
 
-def find_facility(content: str) -> tuple[str, str]:
+def _find_facility(content: str) -> tuple[str, str]:
     out = col.deque([])
     for i in reversed(range(len(content))):
         if content[i] == '-':
@@ -93,7 +93,7 @@ def find_facility(content: str) -> tuple[str, str]:
     return content, content
 
 
-class apogeeFile:
+class ApogeeFile:
 
     # Initializing default values for file labels.
     default_val = "Unknown"
@@ -155,15 +155,15 @@ class apogeeFile:
         # Begin year directory analysis
         content = directories[2]
         self.year_dir = content
-        self.year = find_year(content)
+        self.year = _find_year(content)
 
         # Begin project directory analysis
         content = directories[3]
         self.project_dir = content
         remaining = content.strip()
-        self.state, remaining = find_location(remaining)
+        self.state, remaining = _find_location(remaining)
 
-        self.apogee_project_number, remaining, digit_count = find_project_number(remaining)
+        self.apogee_project_number, remaining, digit_count = _find_project_number(remaining)
 
         # Do not store data if it is not data associated with a project. Here we check if the
         # project number has a reasonable number of digits for an apogee project number.
@@ -172,11 +172,11 @@ class apogeeFile:
             self.ignore_token = True
             return
 
-        self.client, remaining = find_client(remaining)
+        self.client, remaining = _find_client(remaining)
 
-        self.project_name, remaining = find_project_name(remaining)
+        self.project_name, remaining = _find_project_name(remaining)
 
-        self.facility, remaining = find_facility(remaining)
+        self.facility, remaining = _find_facility(remaining)
 
         # Begin additional directory analysis
         content = directories[4]
@@ -196,24 +196,24 @@ def scan_directory(directory: str) -> pd.DataFrame:
     # This is the interface for this file. The user queries a directory
     # and receives a dataframe of labelled file_paths.
 
-    data = create_empty_data()
+    data = _create_empty_data()
     for root, dirs, files in os.walk(directory):
         for filename in files:
-            apogeeFile(os.path.join(root, filename), data)
+            ApogeeFile(os.path.join(root, filename), data)
     return pd.DataFrame(data)
 
 
-def read_test_pickle():
+def _read_test_pickle():
     return pd.read_pickle('Stored_data/test_dataframe.pickle')
 
 
-def main():
+def _main():
     directory = r'C:\dummy'
     test_database = scan_directory(directory)
-    test_database.to_pickle('Stored_data/test_dataframe.pickle')
+    return test_database
 
 
 if __name__ == "__main__":
-    main()
-    test = read_test_pickle()
+    test = _main()
+
 
