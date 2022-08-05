@@ -7,8 +7,16 @@ COLUMN_NAMES = ['apogee_project_number',
                 'client',
                 'state',
                 'facility',
+                'major_sub_directory',
                 'file_path',
-                'file_name']
+                'file_name',
+                'file_type']
+
+IGNORED_FILE_TYPES = {'.bak',
+                      '.rws',
+                      '.slog',
+                      '.dat',
+                      '.db'}
 
 
 def _create_empty_data():
@@ -90,10 +98,29 @@ def _find_facility(content: str) -> tuple[str, str]:
     for i in reversed(range(len(content))):
         if content[i] == '-':
             return content[:i].strip(' -'), content
-    return content, content
+    return "Unknown", content
 
 
-class ApogeeFile:
+def _find_file_type(content: str) -> tuple[str, str, bool]:
+    out = col.deque([])
+    for i in reversed(range(len(content))):
+
+        if content[i] == '.':
+            break
+    file_type = content[i:]
+    ignore = False
+    if file_type in IGNORED_FILE_TYPES:
+        ignore = True
+    return file_type, content[:i], ignore
+
+
+class __ApogeeFile:
+    """
+    ApogeeFile is meant to take a file path from the Apogee project file database and apply labels to help
+    describe the file. If the file is in a project folder and it is not considered clutter as determined by
+    the ignore file types set then the file is parsed and saved to a data file.
+    This can then be used to do advanced queries of the Apogee database using the labels.
+    """
 
     # Initializing default values for file labels.
     default_val = "Unknown"
@@ -110,6 +137,7 @@ class ApogeeFile:
     file_name = default_val
     ignore_token = False
     val_to_column = {}
+    file_type = default_val
 
     def __init__(self, apogee_file_path, data):
         self.path = apogee_file_path
@@ -124,21 +152,19 @@ class ApogeeFile:
             self.add_file_to_data(data)
 
     def map_val_to_column(self):
-        # If the COLUMN_NAMES global variable is changed the mapping below will need to be altered.
+        # If the order / number of COLUMN_NAMES global variables is changed the mapping below will need to be altered.
+        column_attributes = [self.apogee_project_number,
+                             self.project_name,
+                             self.client,
+                             self.state,
+                             self.facility,
+                             self.function_dir,
+                             self.path,
+                             self.file_name,
+                             self.file_type]
 
-        self.val_to_column[COLUMN_NAMES[0]] = self.apogee_project_number
-
-        self.val_to_column[COLUMN_NAMES[1]] = self.project_name
-
-        self.val_to_column[COLUMN_NAMES[2]] = self.client
-
-        self.val_to_column[COLUMN_NAMES[3]] = self.state
-
-        self.val_to_column[COLUMN_NAMES[4]] = self.facility
-
-        self.val_to_column[COLUMN_NAMES[5]] = self.path
-
-        self.val_to_column[COLUMN_NAMES[6]] = self.file_name
+        for name, val in zip(COLUMN_NAMES, column_attributes):
+            self.val_to_column[name] = val
 
     def parse_file_path(self):
         directories = self.path.split('\\')
@@ -152,15 +178,22 @@ class ApogeeFile:
             self.ignore_token = True
             return
 
+        # Begin File Name analysis
+        self.file_name = directories[-1]
+
+        self.file_type, remaining_name, self.ignore_token = _find_file_type(self.file_name)
+
+        # find_file_type checks if the file type is in the ignore file type set.
+        if self.ignore_token:
+            return
+
         # Begin year directory analysis
-        content = directories[2]
-        self.year_dir = content
-        self.year = _find_year(content)
+        self.year_dir = directories[2]
+        self.year = _find_year(self.year_dir)
 
         # Begin project directory analysis
-        content = directories[3]
-        self.project_dir = content
-        remaining = content.strip()
+        self.project_dir = directories[3]
+        remaining = self.project_dir.strip()
         self.state, remaining = _find_location(remaining)
 
         self.apogee_project_number, remaining, digit_count = _find_project_number(remaining)
@@ -179,13 +212,9 @@ class ApogeeFile:
         self.facility, remaining = _find_facility(remaining)
 
         # Begin additional directory analysis
-        content = directories[4]
-        self.function_dir = content
+        self.function_dir = directories[4]
         if size - 1 > 5:
             self.additional_dirs = directories[5:size - 1]
-
-        # Begin File Name analysis
-        self.file_name = directories[-1]
 
     def add_file_to_data(self, data):
         for column in COLUMN_NAMES:
@@ -197,9 +226,11 @@ def scan_directory(directory: str) -> pd.DataFrame:
     # and receives a dataframe of labelled file_paths.
 
     data = _create_empty_data()
+
     for root, dirs, files in os.walk(directory):
         for filename in files:
-            ApogeeFile(os.path.join(root, filename), data)
+            __ApogeeFile(os.path.join(root, filename), data)
+
     return pd.DataFrame(data)
 
 
@@ -215,5 +246,3 @@ def _main():
 
 if __name__ == "__main__":
     test = _main()
-
-
