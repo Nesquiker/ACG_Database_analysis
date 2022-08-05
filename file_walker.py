@@ -8,6 +8,7 @@ COLUMN_NAMES = ['apogee_project_number',
                 'state',
                 'facility',
                 'major_sub_directory',
+                'advanced_label',
                 'file_path',
                 'file_name',
                 'file_type']
@@ -17,6 +18,20 @@ IGNORED_FILE_TYPES = {'.bak',
                       '.slog',
                       '.dat',
                       '.db'}
+
+ADVANCED_LABELS = {'meeting': 'meeting',
+                   '15%': '15%',
+                   '35%': '15%',
+                   '60%': '60%',
+                   '95%': '90%',
+                   'signed': 'signed and sealed',
+                   'sealed': 'signed and sealed',
+                   '100%': '100%',
+                   'sow': 'sow',
+                   'contract': 'contract',
+                   'record': 'as-builts',
+                   'as-built': 'as-builts',
+                   }
 
 
 def _create_empty_data():
@@ -114,6 +129,13 @@ def _find_file_type(content: str) -> tuple[str, str, bool]:
     return file_type, content[:i], ignore
 
 
+def _find_advanced_labels(content: str) -> str:
+    for label in ADVANCED_LABELS:
+        if label in content:
+            return ADVANCED_LABELS[label]
+    return "Unknown"
+
+
 class __ApogeeFile:
     """
     ApogeeFile is meant to take a file path from the Apogee project file database and apply labels to help
@@ -138,6 +160,7 @@ class __ApogeeFile:
     ignore_token = False
     val_to_column = {}
     file_type = default_val
+    advanced_label = default_val
 
     def __init__(self, apogee_file_path, data):
         self.path = apogee_file_path
@@ -159,6 +182,7 @@ class __ApogeeFile:
                              self.state,
                              self.facility,
                              self.function_dir,
+                             self.advanced_label,
                              self.path,
                              self.file_name,
                              self.file_type]
@@ -214,7 +238,8 @@ class __ApogeeFile:
         # Begin additional directory analysis
         self.function_dir = directories[4]
         if size - 1 > 5:
-            self.additional_dirs = directories[5:size - 1]
+            self.additional_dirs = ''.join(directories[5:])
+            self.advanced_label = _find_advanced_labels(self.additional_dirs.lower())
 
     def add_file_to_data(self, data):
         for column in COLUMN_NAMES:
