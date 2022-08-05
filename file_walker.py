@@ -1,20 +1,45 @@
+import collections as col
 import os
 import pandas as pd
-import re
-import collections as col
+
+COLUMN_NAMES = ['apogee_project_number',
+                'project_name',
+                'client',
+                'state',
+                'facility',
+                'file_path',
+                'file_name']
 
 
-COLUMN_NAMES = ['apogee_project_number', 'project_name', 'client', 'state', 'facility', 'file_path']
-DATA = {name: [] for name in COLUMN_NAMES}
+def create_empty_data():
+    return {name: [] for name in COLUMN_NAMES}
+
+
+def create_state_codes(path_to_state_data: str) -> set[str]:
+    state_abbreviations = pd.read_csv(path_to_state_data)
+    abbreviations = extract_state_abbreviations(state_abbreviations.Abbrev)
+    return set(code.upper() for code in state_abbreviations.Code) | abbreviations | {'US', 'SS'}
+
+
+def extract_state_abbreviations(abbreviations) -> set[str]:
+    answer = set()
+    for word in abbreviations:
+        out = []
+        for letter in filter(lambda x: x.isalpha(), word):
+            out.append(letter.upper())
+        answer |= {''.join(out), }
+    return answer
+
+
+STATE_CODE_SET = create_state_codes(r'data_for_lookups/state_data.csv')
 
 
 def find_year(year_dir):
     year = year_dir[:4]
-    if year.isdigit():
-        pass
+    if year.isdigit() and len(year) == 4:
+        return year
     else:
-        year = "Unknown"
-    return year
+        return "Unknown"
 
 
 def find_location(content: str) -> tuple[str, str]:
@@ -27,22 +52,23 @@ def find_location(content: str) -> tuple[str, str]:
 
         else:
             state = ''.join(out)
-            if state not in state_code_set:
+            if state not in STATE_CODE_SET:
                 return 'Unknown', content
             return state, content[:-i - 1]
 
 
-def find_project_number(content: str) -> tuple[str, str]:
+def find_project_number(content: str) -> tuple[str, str, int]:
     out = []
+    digit_count = 0
     for i, char in enumerate(content):
         if char.isalpha():
-            if char == 'Q' and content[i + 1].isdigit():
-                pass
-            else:
+            if char != 'Q' or not content[i + 1].isdigit():
                 break
+
+        digit_count += 1
         out.append(char)
     out = ''.join(out).strip(' -')
-    return out, content[i:]
+    return out, content[i:], digit_count
 
 
 def find_client(content: str) -> tuple[str, str]:
@@ -67,92 +93,127 @@ def find_facility(content: str) -> tuple[str, str]:
     return content, content
 
 
-def create_temp_map() -> dict[str]:
-    return {name: 'Unknown' for name in COLUMN_NAMES}
-
-
-def create_state_codes(path_to_state_data: str) -> set[str]:
-    state_abbreviations = pd.read_csv(path_to_state_data)
-    abbreviations = extract_state_abbreviations(state_abbreviations.Abbrev)
-    return set(code.upper() for code in state_abbreviations.Code) | abbreviations
-
-
-def extract_state_abbreviations(abbreviations) -> set[str]:
-    answer = set()
-    for word in abbreviations:
-        out = []
-        for letter in filter(lambda x: x.isalpha(), word):
-            out.append(letter.upper())
-        answer |= {''.join(out), }
-    return answer
-
-
-state_code_set = create_state_codes(r'data_for_lookups/state_data.csv')
-
-
 class apogeeFile:
 
-    year_dir: str
-    year: str
-    project_dir: str
-    function_dir: str
-    additional_dirs: list
-    is_project_file: bool
-    apogee_project_number: str
-    client: str
-    facility: str
-    project_name: str
-    state: str
-    temp_map: dict
+    # Initializing default values for file labels.
+    default_val = "Unknown"
+    year_dir = default_val
+    year = default_val
+    project_dir = default_val
+    function_dir = default_val
+    additional_dirs = default_val
+    apogee_project_number = default_val
+    client = default_val
+    facility = default_val
+    project_name = default_val
+    state = default_val
+    file_name = default_val
+    ignore_token = False
+    val_to_column = {}
 
-    def __init__(self, apogee_file_path):
+    def __init__(self, apogee_file_path, data):
         self.path = apogee_file_path
-        self.temp_map = create_temp_map()
+
+        # Fills all applicable file labels (project label, client, etc...).
         self.parse_file_path()
 
+        # Do not continue if the file does not appear to be a project file of acceptable type.
+        # This program will attempt to ignore certain files and types in order to reduce clutter.
+        if not self.ignore_token:
+            self.map_val_to_column()
+            self.add_file_to_data(data)
+
+    def map_val_to_column(self):
+        # If the COLUMN_NAMES global variable is changed the mapping below will need to be altered.
+
+        self.val_to_column[COLUMN_NAMES[0]] = self.apogee_project_number
+
+        self.val_to_column[COLUMN_NAMES[1]] = self.project_name
+
+        self.val_to_column[COLUMN_NAMES[2]] = self.client
+
+        self.val_to_column[COLUMN_NAMES[3]] = self.state
+
+        self.val_to_column[COLUMN_NAMES[4]] = self.facility
+
+        self.val_to_column[COLUMN_NAMES[5]] = self.path
+
+        self.val_to_column[COLUMN_NAMES[6]] = self.file_name
 
     def parse_file_path(self):
         directories = self.path.split('\\')
-        self.additional_dirs = []
-        print(self.temp_map)
-        self.temp_map[COLUMN_NAMES[5]] = self.path
-        for i, content in enumerate(directories):
-            if i < 2:
-                pass
-            elif i == 2:
-                self.year_dir = content
-                self.year = find_year(content)
 
-            elif i == 3:
-                self.project_dir = content
-                remaining = content.strip()
+        size = len(directories)
 
-                self.state, remaining = find_location(remaining)
-                self.temp_map[COLUMN_NAMES[3]] = self.state
-                self.apogee_project_number, remaining = find_project_number(remaining)
-                self.temp_map[COLUMN_NAMES[0]] = self.apogee_project_number
-                self.client, remaining = find_client(remaining)
-                self.temp_map[COLUMN_NAMES[2]] = self.client
-                self.project_name, remaining = find_project_name(remaining)
-                self.temp_map[COLUMN_NAMES[1]] = self.project_name
-                self.facility, remaining = find_facility(remaining)
-                self.temp_map[COLUMN_NAMES[4]] = self.facility
-            elif i == 4:
-                self.function_dir = content
-            else:
-                self.additional_dirs.append(content)
+        # Do not store data if it is not data associated with a project. Here we check if the
+        # file has a number of directories that is typical of project files. This also helps to
+        # protect from index errors.
+        if size < 6:
+            self.ignore_token = True
+            return
 
-    def add_file_to_data(self):
-        for column in self.temp_map:
-            DATA[column].append(self.temp_map[column])
+        # Begin year directory analysis
+        content = directories[2]
+        self.year_dir = content
+        self.year = find_year(content)
+
+        # Begin project directory analysis
+        content = directories[3]
+        self.project_dir = content
+        remaining = content.strip()
+        self.state, remaining = find_location(remaining)
+
+        self.apogee_project_number, remaining, digit_count = find_project_number(remaining)
+
+        # Do not store data if it is not data associated with a project. Here we check if the
+        # project number has a reasonable number of digits for an apogee project number.
+        # Projects before 2015 will have 7-digit dates instead of project numbers.
+        if digit_count < 5:
+            self.ignore_token = True
+            return
+
+        self.client, remaining = find_client(remaining)
+
+        self.project_name, remaining = find_project_name(remaining)
+
+        self.facility, remaining = find_facility(remaining)
+
+        # Begin additional directory analysis
+        content = directories[4]
+        self.function_dir = content
+        if size - 1 > 5:
+            self.additional_dirs = directories[5:size - 1]
+
+        # Begin File Name analysis
+        self.file_name = directories[-1]
+
+    def add_file_to_data(self, data):
+        for column in COLUMN_NAMES:
+            data[column].append(self.val_to_column[column])
 
 
-directory = r'C:\dummy'
-for root, dirs, files in os.walk(directory):
+def scan_directory(directory: str) -> pd.DataFrame:
+    # This is the interface for this file. The user queries a directory
+    # and receives a dataframe of labelled file_paths.
 
-    for filename in files:
-        print(os.path.join(root, filename))
-        this_one = apogeeFile(os.path.join(root, filename))
-        this_one.add_file_to_data()
+    data = create_empty_data()
+    for root, dirs, files in os.walk(directory):
+        for filename in files:
+            apogeeFile(os.path.join(root, filename), data)
+    return pd.DataFrame(data)
 
-test_database = pd.DataFrame(DATA)
+
+def read_test_pickle():
+    return pd.read_pickle('Stored_data/test_dataframe.pickle')
+
+
+def main():
+    directory = r'C:\dummy'
+    test_database = scan_directory(directory)
+    test_database.to_pickle('Stored_data/test_dataframe.pickle')
+
+
+if __name__ == "__main__":
+    main()
+    test = read_test_pickle()
+
