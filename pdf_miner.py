@@ -2,6 +2,7 @@ import subprocess as sp
 import timeit as tt
 import collections as col
 import re
+import pandas as pd
 
 
 def pdf_to_txt(target: str, save_as: str):
@@ -11,6 +12,7 @@ def pdf_to_txt(target: str, save_as: str):
 
 class ProjectSheets:
 
+    val_to_column = {}
     search_end_key = 'Set Unknown'
     default_val = 'Unknown'
     project_directory = default_val
@@ -19,34 +21,61 @@ class ProjectSheets:
     acg_project_number = default_val
     va_project_number = default_val
     sheet_development_level = default_val
-    building_identifications: list[str]
-    sheet_titles: list[str]
-    sheet_names: list[str]
-    sheets_numbers: list[str]
-    drawn_by: list[str]
-    checked_by: list[str]
+    building_identifications = col.deque([])
+    sheet_titles = col.deque([])
+    sheet_names = col.deque([])
+    sheets_numbers = col.deque([])
+    drawn_by = col.deque([])
+    checked_by = col.deque([])
 
-
-    def __init__(self, sheet_in_text_path: str):
-
+    def __init__(self, root_pdf_path: str, sheet_in_text_path: str, save_path: str):
+        self.root_path = root_pdf_path
         self.text_data = open(sheet_in_text_path, 'r')
         self.mine_acg_project_data()
-        # self.save_data()
+        self.map_val_to_column()
+        self.save_data(save_path)
 
+    def save_data(self, save_path: str):
+        data = {name: [] for name in self.val_to_column}
+        while self.sheets_numbers:
+            for name in self.val_to_column:
+                if type(self.val_to_column[name]) is str:
+                    data[name].append(self.val_to_column[name])
+                else:
+                    data[name].append(self.val_to_column[name].popleft())
+
+        pd.DataFrame(data).to_pickle(save_path)
+
+    def map_val_to_column(self):
+
+        self.val_to_column = {
+            'Base_PDF_path': self.root_path,
+            'Project_Name': self.project_name,
+            'Facility_Address': self.location_name,
+            'ACG_Project_Number': self.acg_project_number,
+            'VA_Project_Number': self.va_project_number,
+            'Sheet_Development_Level': self.sheet_development_level,
+            'Drawing_Title': self.sheet_titles,
+            'Building_Numbers/Letters': self.building_identifications,
+            'NCS_Building_Designation': self.sheet_names,
+            'Drawing_#_of_#': self.sheets_numbers,
+            'Drawn_By': self.drawn_by,
+            'Checked_By': self.checked_by
+        }
 
     def mine_acg_project_data(self):
 
         # These queries happen only once and are then exhausted. These points are only needed to be found once as they
         # are true for the entire file.
         query_stack_functions = {
-                    'ACG Project Number': self.find_acg_project_number,
+                    'Project Number': self.find_acg_project_number,
                     'Location': self.find_location_address,
                     ' ': self.find_sheet_development_level,
                     'Project Title': self.find_project_name,
-                    'VA Project Number': self.find_va_project_number
+                    'VA PROJECT NUMBER': self.find_va_project_number
                     }
 
-        #These queries are made for every sheet in the set. These queries also occur in the order shown below.
+        # These queries are made for every sheet in the set. These queries also occur in the order shown below.
         query_loop_functions = {
                     'Drawing Title': self.find_sheet_title,
                     'Checked': self.find_checked_initials,
@@ -68,6 +97,9 @@ class ProjectSheets:
             # the current property will be set to 'Unknown'.
             if not is_found:
                 is_found = cached_function[0](current_line)
+                if is_found:
+                    current_line = self.text_data.readline()
+                    continue
 
             if current_stack_search and current_stack_search[-1] in current_line:
 
@@ -91,13 +123,13 @@ class ProjectSheets:
 
                 current_loop_search.rotate(-1)
 
-
             current_line = self.text_data.readline()
 
         self.text_data.close()
 
     def find_acg_project_number(self, line: str) -> bool:
-        if line == self.search_end_key: return True
+        if line == self.search_end_key:
+            return True
         # ACG project number XX-XXX where X is digit from 1-9.
         acg_number_pattern = re.compile('\d{2}-\d{3}')
 
@@ -108,40 +140,46 @@ class ProjectSheets:
         return match is not None
 
     def find_location_address(self, line: str) -> bool:
-        if line == self.search_end_key: return True
+        if line == self.search_end_key:
+            return True
+
         is_location = (line.isupper() and len(line) > 2)
 
         if is_location:
-            self.find_location_address(line)
+            self.location_name = line.strip('\n')
 
         return is_location
 
     def find_sheet_development_level(self, line: str) -> bool:
-        if line == self.search_end_key: return True
+        if line == self.search_end_key:
+            return True
 
-        if not re.search('[A_Z]*', line) or'FULLY SPRINKLERED' in line:
+        if not re.search('[A-Z]+', line) or 'FULLY SPRINKLERED' in line:
             return False
         else:
-            self.sheet_development_level = line
+            self.sheet_development_level = line.strip('\n')
             return True
 
     def find_project_name(self, line: str) -> bool:
-        if line == self.search_end_key: return True
+        if line == self.search_end_key:
+            return True
 
         # The project name may happen over several lines will need to keep updating until a true is reached.
-        if line.islower() and self.project_name == self.default_val:
+        if not line.isupper() and self.project_name == self.default_val:
             return False
         elif line.isupper():
-            self.project_name = line if self.project_name == self.default_val else ' '.join([self.project_name, line])
+            self.project_name = line.strip('\n') if self.project_name == self.default_val \
+                                else ' '.join([self.project_name, line.strip('\n')])
             return False
         else:
             return True
 
     def find_va_project_number(self, line:str) -> bool:
-        if line == self.search_end_key: return True
+        if line == self.search_end_key:
+            return True
 
-        # VA project number XXX-XX-XXX where X is digit from 1-9.
-        va_number_pattern = re.compile('\d{3}-\d{2}-\d{3}')
+        # VA project number XXX-XX-XXX where X is digit from 0-9.
+        va_number_pattern = re.compile("\d{3}-\d{2}-\d{3}")
 
         match = re.search(va_number_pattern, line)
         if match:
@@ -155,11 +193,10 @@ class ProjectSheets:
             return True
 
         if line.isupper() and len(line) > 3:
-            self.sheet_titles.append(line)
+            self.sheet_titles.append(line.strip('\n'))
             return True
         else:
             return False
-
 
     def find_checked_initials(self, line: str) -> bool:
         if line == self.search_end_key:
@@ -189,12 +226,13 @@ class ProjectSheets:
         if line == self.search_end_key:
             self.building_identifications.append(self.default_val)
             return True
-        pattern = re.compile('[a-zA-Z\d]{1}')
+        pattern = re.compile('#')
         match = re.search(pattern, line)
-        if 'Building Number' in line or '#' in line or not match:
+        if match or len(line) < 2 or "Drawing Number" in line or "Building Number" in line:
             return False
         else:
-            self.building_identifications.append(line)
+            self.building_identifications.append(line.strip('\n'))
+            return True
 
     def find_drawing_tag(self, line: str) -> bool:
         if line == self.search_end_key:
@@ -203,7 +241,7 @@ class ProjectSheets:
         pattern = re.compile('\d{3}')
         match = re.search(pattern, line)
         if match:
-            self.sheet_names.append(line)
+            self.sheet_names.append(line.strip('\n'))
             return True
         else:
             return False
@@ -220,7 +258,7 @@ class ProjectSheets:
 
         out = line[start:]
         if out:
-            self.sheets_numbers.append(line[start:])
+            self.sheets_numbers.append(line[start:].strip('\n'))
             return True
         else:
             return False
@@ -230,13 +268,14 @@ def main():
 
     start = tt.default_timer()
 
-    target = r"Stored_data\20-398 AVAHCS 65_ DD Dwgs_rot.pdf"
+    target = r"Stored_data/20-393 DWGs.pdf"
     test_name = 'tester'
-    save_as = fr'Stored_data\drawing_sheet_text_files\{test_name}.txt'
+    save_text_as = fr'Stored_data\drawing_sheet_text_files\{test_name}.txt'
 
-    pdf_to_txt(target, save_as)
+    pdf_to_txt(target, save_text_as)
 
-    ProjectSheets(save_as)
+    save_pickle_as = fr'Stored_data\sheet_databases\{test_name}.pickle'
+    ProjectSheets(target, save_text_as, save_pickle_as)
 
 
 
@@ -247,4 +286,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+    for_test = pd.read_pickle(r'Stored_data/sheet_databases/tester.pickle')
